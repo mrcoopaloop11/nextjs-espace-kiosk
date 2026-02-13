@@ -1,26 +1,49 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* This links Tailwind's "font-sans" to the Next.js font variable */
+  --font-sans: var(--font-nunito-sans);
+  
+  /* Set your dark mode colors here */
+  --color-background: #0a0a0a;
+  --color-foreground: #ededed;
+
+  /* Small is now the old "Base" size (16px) */
+  --text-sm: 1rem;
+  --text-sm--line-height: 1.5rem;
+
+  /* Base is now the old "Large" size (18px) */
+  --text-base: 1.125rem;
+  --text-base--line-height: 1.75rem;
+
+  /* Large is now the old "XL" size (20px) */
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.75rem;
+
+  /* XL is now the old "2XL" size (24px) */
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 2rem;
+
+  /* 2XL is now the old "3XL" size (30px) */
+  --text-2xl: 1.875rem;
+  --text-2xl--line-height: 2.25rem;
+
+  /* 3XL is now the old "4XL" size (36px) */
+  --text-3xl: 2.25rem;
+  --text-3xl--line-height: 2.5rem;
+
+  /* 4XL is now the old "5XL" size (48px) */
+  --text-4xl: 3rem;
+  --text-4xl--line-height: 1;
+
+  /* 5XL is now the old "6XL" size (60px) */
+  --text-5xl: 3.75rem;
+  --text-5xl--line-height: 1;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+/* Apply the variables to the body */
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
 }
