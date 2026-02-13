@@ -40,6 +40,7 @@ function KioskContent() {
   const [events, setEvents] = useState<EventData[]>([]);
   const [apiLocationName, setApiLocationName] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -63,14 +64,25 @@ function KioskContent() {
   const fetchEvents = async () => {
     try {
       const res = await fetch(`/api/events?location=${locationCode}&day=${dayParam}&filter=${filterParam}`);
+      
+      if (!res.ok) throw new Error(`API Error: ${res.status}`);
+
       const data = await res.json();
       setEvents(data.events || []);
       
       if (data.locationName) {
         setApiLocationName(data.locationName);
       }
+      
+      // We succeeded! Make sure offline warning is hidden.
+      setIsOffline(false); 
+      
     } catch (error) {
-      console.error("Failed to fetch events", error);
+      console.error("Failed to fetch events. Keeping previous schedule on screen.", error);
+      
+      // We failed! Show the offline warning and retry in 60 seconds.
+      setIsOffline(true);
+      setTimeout(fetchEvents, 60 * 1000); 
     } finally {
       setLoading(false);
     }
@@ -261,14 +273,22 @@ function KioskContent() {
 
   const isToday = dayParam === 'today';
 
-  // --- BUILD TABLE ROWS (Dynamic Indicators) ---
+  // --- BUILD TABLE ROWS (Auto-Expiring & Dynamic Indicators) ---
   const tableRows: any[] = [];
   
   if (events.length > 0) {
-    // 1. Get our configured indicators and sort them by time
+    // NEW: Filter events locally against the ticking clock!
+    // Even if the internet dies, events will vanish as their time passes.
+    const visibleEvents = events.filter(event => {
+      if (filterParam !== 'active') return true; 
+      
+      // event.endDate looks like "2026-02-13T14:30:00"
+      const endTime = new Date(event.endDate).getTime();
+      return endTime > currentTime.getTime(); 
+    });
+
     let activeIndicators = [...TIME_SEPARATORS].sort((a, b) => a.time.localeCompare(b.time));
 
-    // 2. Remove indicators that have already passed if we are looking at Today
     if (isToday) {
       const h = currentTime.getHours().toString().padStart(2, '0');
       const m = currentTime.getMinutes().toString().padStart(2, '0');
@@ -276,17 +296,15 @@ function KioskContent() {
       
       activeIndicators = activeIndicators.filter(ind => ind.time > currentString);
     } else if (!isNaN(Number(dayParam)) && Number(dayParam) < 0) {
-      // If looking at a past day, don't show any future indicators
       activeIndicators = [];
     }
 
-    // 3. Loop through events and inject indicators smartly
     let highestPrintedIndex = -1;
 
-    events.forEach((event, i) => {
+    // IMPORTANT: Loop over visibleEvents instead of events
+    visibleEvents.forEach((event, i) => {
       const timeString = event.startDate.split('T')[1] || "00:00:00";
 
-      // Find the *latest* indicator that this event falls after
       let matchedIndex = -1;
       for (let j = activeIndicators.length - 1; j >= 0; j--) {
         if (timeString >= activeIndicators[j].time) {
@@ -295,8 +313,6 @@ function KioskContent() {
         }
       }
 
-      // If we crossed a threshold we haven't printed yet, print it!
-      // (This automatically skips 12:00 PM if the first event is at 6:00 PM)
       if (matchedIndex > highestPrintedIndex) {
         tableRows.push({ 
           type: 'indicator', 
@@ -306,7 +322,6 @@ function KioskContent() {
         highestPrintedIndex = matchedIndex;
       }
 
-      // Finally, push the actual event row
       tableRows.push({ type: 'event', data: event, index: i, key: `${event.id}-${i}` });
     });
   }
@@ -317,6 +332,14 @@ function KioskContent() {
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
+
+      {/* NEW: Offline Warning Banner */}
+      {isOffline && (
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 bg-red-600/90 backdrop-blur-sm text-white text-xs px-4 py-1.5 rounded-b-lg font-bold uppercase tracking-widest shadow-lg z-50 flex items-center gap-2">
+          <span className="animate-pulse w-2 h-2 bg-white rounded-full"></span>
+          Offline • Using Cached Schedule
+        </div>
+      )}
 
       {/* Header */}
       <header className={`px-8 py-6 flex items-center justify-between z-20 relative border-b ${styles.header}`}>
