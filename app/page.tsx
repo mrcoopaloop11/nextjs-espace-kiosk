@@ -7,8 +7,10 @@ import { IconDoor, IconClock, IconCalendar } from '@tabler/icons-react';
 type EventData = {
   id: number;
   name: string;
+  scheduleName: string; // Add this
   startDate: string;
   endDate: string;
+  expiryDate: string;   // Add this
   description: string;
   rooms: string[];
   locationName: string;
@@ -282,9 +284,9 @@ function KioskContent() {
     const visibleEvents = events.filter(event => {
       if (filterParam !== 'active') return true; 
       
-      // event.endDate looks like "2026-02-13T14:30:00"
-      const endTime = new Date(event.endDate).getTime();
-      return endTime > currentTime.getTime(); 
+      // Use expiryDate (teardown) instead of endDate (display end)
+      const expiryTime = new Date(event.expiryDate).getTime();
+      return expiryTime > currentTime.getTime(); 
     });
 
     let activeIndicators = [...TIME_SEPARATORS].sort((a, b) => a.time.localeCompare(b.time));
@@ -347,7 +349,7 @@ function KioskContent() {
           <h1 className={`text-3xl font-bold tracking-tight ${styles.headerTitle}`}>
             {churchName}
           </h1>
-          <p className={`text-lg font-medium tracking-wide uppercase mt-1 ${styles.headerSub}`}>
+          <p className={`text-lg font-medium tracking-wide capitalize mt-1 ${styles.headerSub}`}>
             {campusSubtitle}
           </p>
         </div>
@@ -475,11 +477,26 @@ function KioskContent() {
                           </div>
                         </td>
 
-                        {/* Event Name */}
+                        {/* Event Name & Schedule Name Column */}
                         <td className={`px-6 py-6 align-top border-r ${styles.cellBorder}`}>
-                          <span className={`text-3xl font-bold block leading-tight ${styles.cellTextMain}`}>
-                            {event.name}
-                          </span>
+                          <div className="flex items-center gap-2 flex-wrap text-left">
+                            {/* Primary Text: Always show the Schedule Name as the main heading */}
+                            <span className={`text-3xl font-bold leading-tight ${styles.cellTextMain}`}>
+                              {event.scheduleName}
+                            </span>
+
+                            {/* Secondary Text: Only show Event Name if it is different from the Schedule Name */}
+                            {event.eventName && event.eventName !== event.scheduleName && (
+                              <>
+                                <span className={`${styles.headerSub} text-xl pt-1`}>•</span>
+                                <span className={`text-sm font-semibold tracking-wider ${styles.headerSub} opacity-90 pt-2`}>
+                                  {event.eventName}
+                                </span>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Description */}
                           {event.description && (
                             <p className={`text-lg font-normal mt-2 line-clamp-2 ${styles.cellTextSub}`}>
                               {event.description}

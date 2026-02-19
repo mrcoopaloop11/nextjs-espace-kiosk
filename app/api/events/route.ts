@@ -108,38 +108,34 @@ export async function GET(request: NextRequest) {
       if (e.Status !== 'Approved') return false;
       if (filterParam === 'all') return true; 
 
-      const endTimePart = e.EndTime || '23:59:59';
-      const correctEventEndString = `${targetDateString}T${endTimePart}`;
+      // Use Teardown time for expiry if it exists, otherwise use EndTime
+      const expiryTimePart = e.TearDownEndTime || e.EndTime || '23:59:59';
+      const expiryString = `${targetDateString}T${expiryTimePart}`;
 
-      return correctEventEndString > currentPTString;
+      return expiryString > currentPTString;
     });
 
-    // 3. Get Rooms and Format (FIXED DATE OVERRIDE)
+    // 3. Get Rooms and Format
     const detailedEvents = await Promise.all(
       activeAndApprovedEvents.map(async (e: any) => {
         const roomNames = await getEventSpaces(e.EventId, e.ScheduleId, token);
         
         const sTime = e.StartTime || '00:00:00';
-        // Force the date to the target query date to prevent recurring/timezone bugs
         const fullStartDate = `${targetDateString}T${sTime}`;
 
         const eTime = e.EndTime || '23:59:59';
+        const tTime = e.TearDownEndTime || eTime; // Fallback to end time
         
-        // Handle overnight events (e.g. 10 PM to 2 AM) safely
-        let endTargetDate = targetDateString;
-        if (eTime < sTime) {
-          const nextDay = new Date(targetDateObj);
-          nextDay.setDate(nextDay.getDate() + 1);
-          const [nMonth, nDay, nYear] = dateFormatter.format(nextDay).split('/');
-          endTargetDate = `${nYear}-${nMonth}-${nDay}`;
-        }
-        const fullEndDate = `${endTargetDate}T${eTime}`; 
+        // Logic for expiry (teardown)
+        const expiryDate = `${targetDateString}T${tTime}`;
 
         return {
           id: e.EventId, 
-          name: e.EventName, 
+          eventName: e.EventName, 
+          scheduleName: e.ScheduleName, // This is now explicitly passed
           startDate: fullStartDate, 
-          endDate: fullEndDate, 
+          endDate: `${targetDateString}T${eTime}`, // Original end time for display
+          expiryDate: expiryDate, // New field used for client-side auto-hide
           description: e.Description, 
           locationName: e.Locations?.[0]?.Name || '', 
           rooms: roomNames
