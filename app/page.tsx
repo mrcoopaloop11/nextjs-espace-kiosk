@@ -392,7 +392,7 @@ function KioskContent() {
             <table className="w-full text-left border-collapse table-fixed">
               <thead className={`uppercase text-lg tracking-wider font-bold sticky top-0 z-10 shadow-md ${styles.tableHead}`}>
                 <tr>
-                  <th className={`w-[10%] px-6 py-4 border-b ${isDark ? 'border-neutral-700 bg-neutral-800' : 'border-slate-200 bg-slate-100'}`}>
+                  <th className={`w-[160px] px-6 py-4 border-b ${isDark ? 'border-neutral-700 bg-neutral-800' : 'border-slate-200 bg-slate-100'}`}>
                     <div className="flex items-center gap-2">
                       <IconClock size={24} />
                       <span>Time</span>

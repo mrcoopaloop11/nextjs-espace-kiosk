@@ -1,6 +1,6 @@
 #!/bin/bash
 # Created by Cooper Santillan
-# eSpace Digital Kiosk - Installer
+# eSpace Digital Kiosk - Installer (Fixed for Standalone & Caddy)
 
 cd "$(dirname "$0")"
 
@@ -13,37 +13,59 @@ SERVICE_NAME="com.cooper.espacekiosk"
 INSTALL_DIR="$HOME/Library/Application Support/eSpaceKiosk"
 PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
 
-# 2. Check for Node.js Dependency
+# 2. Check for Node.js & Homebrew
 if ! command -v node &> /dev/null; then
-    echo "⚠️  Node.js is not installed!"
-    echo "Attempting to install Node.js via Homebrew..."
+    echo "⚠️  Node.js is not installed! Installing via Homebrew..."
     if ! command -v brew &> /dev/null; then
-        echo "❌ Homebrew is not installed. Please install Node.js manually from https://nodejs.org/"
-        read -p "Press Enter to exit..."
+        echo "❌ Homebrew not found. Install it from https://brew.sh/"
         exit 1
     fi
     brew install node
 fi
 
 NODE_PATH=$(which node)
-NPM_PATH=$(which npm)
 
-# 3. Setup Directory
-echo "📁 Copying application files to Application Support..."
+# 3. Setup Directory & Build
+echo "📁 Syncing files..."
 mkdir -p "$INSTALL_DIR"
-# We use rsync to copy your code while ignoring the heavy/cached folders
-rsync -av --exclude "node_modules" --exclude ".next" --exclude ".git" ./ "$INSTALL_DIR/"
+rsync -av --exclude "node_modules" --exclude ".git" ./ "$INSTALL_DIR/"
 
-# 4. Install Dependencies & Build
-echo "📦 Installing npm dependencies..."
+echo "📦 Installing dependencies & building..."
 cd "$INSTALL_DIR"
-"$NPM_PATH" install
+npm install
+npm run build
 
-echo "🏗️  Building the Next.js application (This may take a minute)..."
-"$NPM_PATH" run build
+echo "🎨 Copying assets for standalone mode..."
+cp -r "$INSTALL_DIR/public" "$INSTALL_DIR/.next/standalone/public"
+mkdir -p "$INSTALL_DIR/.next/standalone/.next"
+cp -r "$INSTALL_DIR/.next/static" "$INSTALL_DIR/.next/standalone/.next/static"
 
-# 5. Create the Plist
+# 4. Handle Caddy (Reverse Proxy)
+if ! command -v caddy &> /dev/null; then
+    brew install caddy
+fi
+
+# Detect Homebrew prefix (Intel vs Apple Silicon)
+BREW_PREFIX=$(brew --prefix)
+CADDY_CONFIG="$BREW_PREFIX/etc/Caddyfile"
+
+echo "⚙️  Configuring Caddy for Local HTTPS..."
+sudo bash -c "cat <<EOF > $CADDY_CONFIG
+# This listens on both 80 and 443
+:80, :443 {
+    # Generates a local self-signed cert
+    tls internal
+    reverse_proxy localhost:3000
+}
+EOF"
+
+# Restart Caddy to apply
+sudo brew services restart caddy
+
+# 5. Create the Plist (FIXED FOR STANDALONE MODE)
 echo "⚙️  Creating background service..."
+
+# We target .next/standalone/server.js directly as per your error log
 cat <<EOF > "$PLIST_PATH"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -51,27 +73,24 @@ cat <<EOF > "$PLIST_PATH"
 <dict>
     <key>Label</key>
     <string>$SERVICE_NAME</string>
-    <key>Project</key>
-    <string>eSpace Digital Kiosk</string>
-    
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>$BREW_PREFIX/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PORT</key>
+        <string>3000</string>
+        <key>HOSTNAME</key>
+        <string>0.0.0.0</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
     </dict>
-    
     <key>WorkingDirectory</key>
-    <string>$INSTALL_DIR</string>
-    
+    <string>$INSTALL_DIR/.next/standalone</string>
     <key>ProgramArguments</key>
     <array>
         <string>$NODE_PATH</string>
-        <string>$INSTALL_DIR/node_modules/.bin/next</string>
-        <string>start</string>
-        <string>-p</string>
-        <string>3000</string>
+        <string>server.js</string>
     </array>
-    
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -90,8 +109,9 @@ launchctl unload "$PLIST_PATH" 2>/dev/null
 launchctl load "$PLIST_PATH"
 
 echo "------------------------------------------"
-echo "✅ Installed successfully!"
-echo "The kiosk is now running in the background on http://localhost:3000"
-echo "It will automatically start whenever this Mac turns on/logs in."
+echo "✅ Done!"
+echo "Next.js running on: http://localhost:3000"
+echo "Proxy running on:   http://localhost"
 echo "------------------------------------------"
 read -p "Press Enter to close..."
+exit 0
