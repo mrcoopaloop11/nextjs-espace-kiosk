@@ -1,6 +1,6 @@
 #!/bin/bash
 # Created by Cooper Santillan
-# eSpace Digital Kiosk - Installer (Fixed for Standalone & Caddy)
+# eSpace Digital Kiosk - Full Auto-Installer
 
 cd "$(dirname "$0")"
 
@@ -13,24 +13,34 @@ SERVICE_NAME="com.cooper.espacekiosk"
 INSTALL_DIR="$HOME/Library/Application Support/eSpaceKiosk"
 PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
 
-# 2. Check for Node.js & Homebrew
-if ! command -v node &> /dev/null; then
-    echo "⚠️  Node.js is not installed! Installing via Homebrew..."
-    if ! command -v brew &> /dev/null; then
-        echo "❌ Homebrew not found. Install it from https://brew.sh/"
-        exit 1
+# 2. Check/Install Homebrew
+if ! command -v brew &> /dev/null; then
+    echo "🍺 Homebrew not found. Installing Homebrew first..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    
+    # Add brew to path for the current session (Handling both Apple Silicon & Intel)
+    if [[ $(uname -m) == "arm64" ]]; then
+        eval "$(/opt/homebrew/bin/brew shellenv)"
+    else
+        eval "$(/usr/local/bin/brew shellenv)"
     fi
+fi
+
+# 3. Check/Install Node.js
+if ! command -v node &> /dev/null; then
+    echo "🟢 Installing Node.js..."
     brew install node
 fi
 
 NODE_PATH=$(which node)
+BREW_PREFIX=$(brew --prefix)
 
-# 3. Setup Directory & Build
-echo "📁 Syncing files..."
+# 4. Setup Directory & Build
+echo "📁 Syncing files to Application Support..."
 mkdir -p "$INSTALL_DIR"
 rsync -av --exclude "node_modules" --exclude ".git" ./ "$INSTALL_DIR/"
 
-echo "📦 Installing dependencies & building..."
+echo "📦 Installing npm dependencies & building..."
 cd "$INSTALL_DIR"
 npm install
 npm run build
@@ -40,32 +50,28 @@ cp -r "$INSTALL_DIR/public" "$INSTALL_DIR/.next/standalone/public"
 mkdir -p "$INSTALL_DIR/.next/standalone/.next"
 cp -r "$INSTALL_DIR/.next/static" "$INSTALL_DIR/.next/standalone/.next/static"
 
-# 4. Handle Caddy (Reverse Proxy)
+# 5. Handle Caddy (Reverse Proxy)
 if ! command -v caddy &> /dev/null; then
+    echo "🔒 Installing Caddy..."
     brew install caddy
 fi
 
-# Detect Homebrew prefix (Intel vs Apple Silicon)
-BREW_PREFIX=$(brew --prefix)
 CADDY_CONFIG="$BREW_PREFIX/etc/Caddyfile"
 
-echo "⚙️  Configuring Caddy for Local HTTPS..."
+echo "⚙️  Configuring Caddy for Network & Local HTTPS..."
 sudo bash -c "cat <<EOF > $CADDY_CONFIG
-# This listens on both 80 and 443
+# Listen on 80 and 443 for any IP or hostname
 :80, :443 {
-    # Generates a local self-signed cert
     tls internal
     reverse_proxy localhost:3000
 }
 EOF"
 
-# Restart Caddy to apply
+echo "🚀 Restarting Caddy (requires sudo)..."
 sudo brew services restart caddy
 
-# 5. Create the Plist (FIXED FOR STANDALONE MODE)
+# 6. Create the Plist
 echo "⚙️  Creating background service..."
-
-# We target .next/standalone/server.js directly as per your error log
 cat <<EOF > "$PLIST_PATH"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -103,15 +109,14 @@ cat <<EOF > "$PLIST_PATH"
 </plist>
 EOF
 
-# 6. Load Service
+# 7. Load Service
 echo "🚀 Starting the Kiosk server..."
 launchctl unload "$PLIST_PATH" 2>/dev/null
 launchctl load "$PLIST_PATH"
 
 echo "------------------------------------------"
 echo "✅ Done!"
-echo "Next.js running on: http://localhost:3000"
-echo "Proxy running on:   http://localhost"
+echo "Server: http://localhost:3000"
+echo "Proxy:  http://localhost and https://localhost"
 echo "------------------------------------------"
 read -p "Press Enter to close..."
-exit 0
