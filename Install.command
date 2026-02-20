@@ -1,6 +1,6 @@
 #!/bin/bash
 # Created by Cooper Santillan
-# eSpace Digital Kiosk - Full Auto-Installer
+# eSpace Digital Kiosk - Super Installer (Prompt Once)
 
 cd "$(dirname "$0")"
 
@@ -8,44 +8,82 @@ echo "------------------------------------------"
 echo "   eSpace Kiosk - Installer"
 echo "------------------------------------------"
 
-# 1. Define Paths
+# 1. Ask for Admin Credentials Upfront
+echo "To install global dependencies, please provide an Administrator account."
+read -p "Admin Username: " ADMIN_USER
+read -s -p "Admin Password: " ADMIN_PASS
+echo ""
+echo ""
+
+# Verify the user exists locally
+if ! id "$ADMIN_USER" &>/dev/null; then
+    echo "❌ Error: User '$ADMIN_USER' not found on this Mac."
+    read -p "Press Enter to exit..."
+    exit 1
+fi
+
+# Verify the password and admin privileges immediately
+echo "🔐 Verifying credentials..."
+if ! osascript -e "do shell script \"echo ok\" user name \"$ADMIN_USER\" password \"$ADMIN_PASS\" with administrator privileges" &>/dev/null; then
+    echo "❌ Error: Invalid password or '$ADMIN_USER' is not an Administrator."
+    read -p "Press Enter to exit..."
+    exit 1
+fi
+echo "✅ Credentials accepted."
+
+# 2. Command Wrappers
+# Runs as true root (for system files and services)
+run_root() {
+    # cd /tmp prevents the "directory not readable" Homebrew error
+    local cmd="cd /tmp && $1" 
+    local escaped=$(echo "$cmd" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+    osascript -e "do shell script \"$escaped\" user name \"$ADMIN_USER\" password \"$ADMIN_PASS\" with administrator privileges"
+}
+
+# Runs as the Admin user (required because Homebrew refuses to run as root)
+run_admin() {
+    run_root "sudo -H -u $ADMIN_USER bash -c '$1'"
+}
+
+# 3. Detect Homebrew Path
+if [[ $(uname -m) == "arm64" ]]; then
+    BREW_PREFIX="/opt/homebrew"
+else
+    BREW_PREFIX="/usr/local"
+fi
+BREW_BIN="$BREW_PREFIX/bin/brew"
+
 SERVICE_NAME="com.cooper.espacekiosk"
 INSTALL_DIR="$HOME/Library/Application Support/eSpaceKiosk"
 PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
+CURRENT_USER_ZPROFILE="$HOME/.zprofile"
 
-# 2. Check/Install Homebrew
-if ! command -v brew &> /dev/null; then
-    echo "🍺 Homebrew not found. Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+# 4. Install Homebrew
+if [ ! -f "$BREW_BIN" ]; then
+    echo "🍺 Installing Homebrew..."
+    # Download installer to temp file to avoid AppleScript quoting nightmares
+    run_root "curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o /tmp/install_brew.sh"
+    run_root "chmod +x /tmp/install_brew.sh"
+    run_admin "NONINTERACTIVE=1 /tmp/install_brew.sh"
     
-    # Handle Pathing for Apple Silicon (Standard for newer Kiosk Macs)
-    if [[ $(uname -m) == "arm64" ]]; then
-        BREW_SHELL_CMD='eval "$(/opt/homebrew/bin/brew shellenv)"'
-    else
-        BREW_SHELL_CMD='eval "$(/usr/local/bin/brew shellenv)"'
-    fi
-
-    # Add to .zprofile if not already there
-    if ! grep -q "brew shellenv" "$CURRENT_USER_ZPROFILE" 2>/dev/null; then
-        echo "" >> "$CURRENT_USER_ZPROFILE"
-        echo "$BREW_SHELL_CMD" >> "$CURRENT_USER_ZPROFILE"
-        echo "✅ Added Homebrew to $CURRENT_USER_ZPROFILE"
-    fi
-    
-    # Run it now so the current script can use 'brew'
-    eval "$BREW_SHELL_CMD"
+    # Add to current user's path so it persists on future logins
+    echo "" >> "$CURRENT_USER_ZPROFILE"
+    echo "eval \"\$($BREW_BIN shellenv)\"" >> "$CURRENT_USER_ZPROFILE"
+    echo "✅ Added Homebrew to $CURRENT_USER_ZPROFILE"
 fi
 
-# 3. Check/Install Node.js
-if ! command -v node &> /dev/null; then
-    echo "🟢 Installing Node.js..."
-    brew install node
+# Force inject Homebrew into the CURRENT script's path so npm can be found
+export PATH="$BREW_PREFIX/bin:$PATH"
+
+# 5. Install Node.js & Caddy
+if ! command -v node &> /dev/null || ! command -v caddy &> /dev/null; then
+    echo "🟢 Installing Node.js & Caddy via Homebrew..."
+    run_admin "$BREW_BIN install node caddy"
 fi
 
 NODE_PATH=$(which node)
-BREW_PREFIX=$(brew --prefix)
 
-# 4. Setup Directory & Build
+# 6. Local Setup & Build (Runs normally as 'media')
 echo "📁 Syncing files to Application Support..."
 mkdir -p "$INSTALL_DIR"
 rsync -av --exclude "node_modules" --exclude ".git" ./ "$INSTALL_DIR/"
@@ -60,28 +98,22 @@ cp -r "$INSTALL_DIR/public" "$INSTALL_DIR/.next/standalone/public"
 mkdir -p "$INSTALL_DIR/.next/standalone/.next"
 cp -r "$INSTALL_DIR/.next/static" "$INSTALL_DIR/.next/standalone/.next/static"
 
-# 5. Handle Caddy (Reverse Proxy)
-if ! command -v caddy &> /dev/null; then
-    echo "🔒 Installing Caddy..."
-    brew install caddy
-fi
-
-CADDY_CONFIG="$BREW_PREFIX/etc/Caddyfile"
-
-echo "⚙️  Configuring Caddy for Network & Local HTTPS..."
-sudo bash -c "cat <<EOF > $CADDY_CONFIG
-# Listen on 80 and 443 for any IP or hostname
+# 7. Configure Caddy (Requires Root)
+echo "⚙️  Configuring Caddy..."
+# Write to temp file first, then move it as root
+cat <<EOF > /tmp/Caddyfile_espace
 :80, :443 {
     tls internal
     reverse_proxy localhost:3000
 }
-EOF"
+EOF
+run_root "mv /tmp/Caddyfile_espace $BREW_PREFIX/etc/Caddyfile"
 
-echo "🚀 Restarting Caddy (requires sudo)..."
-sudo brew services restart caddy
+echo "🚀 Restarting Caddy background proxy..."
+run_root "$BREW_BIN services restart caddy"
 
-# 6. Create the Plist
-echo "⚙️  Creating background service..."
+# 8. Create the LaunchAgent (Runs normally as 'media')
+echo "⚙️  Creating Next.js background service..."
 cat <<EOF > "$PLIST_PATH"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -119,13 +151,13 @@ cat <<EOF > "$PLIST_PATH"
 </plist>
 EOF
 
-# 7. Load Service
+# 9. Load Service
 echo "🚀 Starting the Kiosk server..."
 launchctl unload "$PLIST_PATH" 2>/dev/null
 launchctl load "$PLIST_PATH"
 
 echo "------------------------------------------"
-echo "✅ Done!"
+echo "✅ Installed successfully!"
 echo "Server: http://localhost:3000"
 echo "Proxy:  http://localhost and https://localhost"
 echo "------------------------------------------"
