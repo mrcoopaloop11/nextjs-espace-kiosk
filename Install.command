@@ -15,15 +15,25 @@ PLIST_PATH="$HOME/Library/LaunchAgents/$SERVICE_NAME.plist"
 
 # 2. Check/Install Homebrew
 if ! command -v brew &> /dev/null; then
-    echo "🍺 Homebrew not found. Installing Homebrew first..."
+    echo "🍺 Homebrew not found. Installing Homebrew..."
     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     
-    # Add brew to path for the current session (Handling both Apple Silicon & Intel)
+    # Handle Pathing for Apple Silicon (Standard for newer Kiosk Macs)
     if [[ $(uname -m) == "arm64" ]]; then
-        eval "$(/opt/homebrew/bin/brew shellenv)"
+        BREW_SHELL_CMD='eval "$(/opt/homebrew/bin/brew shellenv)"'
     else
-        eval "$(/usr/local/bin/brew shellenv)"
+        BREW_SHELL_CMD='eval "$(/usr/local/bin/brew shellenv)"'
     fi
+
+    # Add to .zprofile if not already there
+    if ! grep -q "brew shellenv" "$CURRENT_USER_ZPROFILE" 2>/dev/null; then
+        echo "" >> "$CURRENT_USER_ZPROFILE"
+        echo "$BREW_SHELL_CMD" >> "$CURRENT_USER_ZPROFILE"
+        echo "✅ Added Homebrew to $CURRENT_USER_ZPROFILE"
+    fi
+    
+    # Run it now so the current script can use 'brew'
+    eval "$BREW_SHELL_CMD"
 fi
 
 # 3. Check/Install Node.js
